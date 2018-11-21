@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.List;
+import java.util.Vector;
 
 import javax.imageio.ImageIO;
 
@@ -71,22 +73,42 @@ public class AnnoReader {
         ByteBuffer buf = readBytes(inputFile);
         buf.order(ByteOrder.LITTLE_ENDIAN);
         
+        final int HEADER_LENGTH = 20;
+        
         // Skip unknown bytes
         // 12 byte header: 42 53 48 00 A8 11 41 00 40 00 00 00
         // 8 unknown bytes
-        buf.position(buf.position() + 20);
+        buf.position(buf.position() + HEADER_LENGTH);
         
-        // More unknown bytes to follow but at least we know how many!
-        int bytesToSkip = buf.getInt() - 4;
-        buf.position(buf.position() + bytesToSkip);
+        // Load the offset of the first image
+        int firstoffset = buf.getInt() + HEADER_LENGTH;
+        
+        // List with all image offsets
+        List<Integer> offsets = new Vector<Integer>();
+        
+        offsets.add(firstoffset);
+        
+        // Load offsets of all images
+        for (int offset = buf.getInt(); buf.position() <= firstoffset; offset = buf.getInt()) {
+			offsets.add(offset + HEADER_LENGTH);
+		}      
         
         // Ensure output directory exists
         new File(OUTPUT_DIR).mkdir();
         
         // Read (and save) each image in the file
         int i = 0;
-        while (buf.remaining() > 4){
+        
+        for (Integer offset : offsets) {
+        	buf.position(offset);
+        	
             BufferedImage image = readImage(buf);
+            
+            // Not every image is correct!
+            if(image == null) {
+            	continue;
+            }
+            
             String filename = OUTPUT_DIR + "/" +
                     inputFile.getName() + "_" +
                     String.valueOf(i) + ".png";
@@ -107,18 +129,16 @@ public class AnnoReader {
         
         int x = 0;
         int y = 0;
-        
-        // Skip to the next offset that's divisible by 4
-        int offset = buf.position();
-        int remainder = offset % 4;
-        if (remainder > 0) {
-            buf.position(offset + (4 - remainder));
-        }
     
         // Read width and height
         int width =  buf.getInt();
         int height = buf.getInt();
 
+        // Check if the image has a valid size
+        if (width <= 0 || height <= 0) {
+        	return null;
+        }
+        
         BufferedImage image = new BufferedImage(width, height, 
                 BufferedImage.TYPE_INT_ARGB);
         
